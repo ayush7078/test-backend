@@ -17,7 +17,7 @@ This API provides routes for user registration, login, profile update, password 
 ### 1. Clone the Repository
 Clone this repository to your local machine.
 
-git clone https://github.com/your-username/your-repo.git
+git clone https://github.com/ayush7078/test-backend.git
 
 2. Install Dependencies
 Install the required dependencies using npm:
