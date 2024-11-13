@@ -6,42 +6,26 @@ const { check, validationResult } = require('express-validator');
 const multer = require('multer');
 const path = require('path');
 const User = require('../models/User');
-const router = express.Router();
 const dotenv = require('dotenv');
 
 dotenv.config();
+const router = express.Router();
 
 // Multer configuration for image uploads
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, 'uploads/');
-    },
-    filename: (req, file, cb) => {
-        const ext = path.extname(file.originalname);
-        cb(null, Date.now() + ext);
-    }
+    destination: (req, file, cb) => cb(null, 'uploads/'),
+    filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
 });
-
 const upload = multer({ storage: storage });
 
 // Helper function to send email (forgot password)
 const sendMail = (email, subject, text) => {
     const transporter = nodemailer.createTransport({
         service: 'gmail',
-        auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS
-        }
+        auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
     });
 
-    const mailOptions = {
-        from: process.env.EMAIL_USER,
-        to: email,
-        subject: subject,
-        text: text
-    };
-
-    return transporter.sendMail(mailOptions);
+    return transporter.sendMail({ from: process.env.EMAIL_USER, to: email, subject, text });
 };
 
 // Registration Route
@@ -52,39 +36,25 @@ router.post(
         check('email', 'Please include a valid email').isEmail(),
         check('password', 'Password must be 6 or more characters').isLength({ min: 6 })
     ],
-    upload.single('profileImage'), 
+    upload.single('profileImage'),
     async (req, res) => {
         const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
-        }
+        if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
         const { name, email, password } = req.body;
-    
+        const profileImage = req.file ? `/uploads/${req.file.filename}` : '';
+
         try {
-            const profileImage = req.file ? `/uploads/${req.file.filename}` : '';
-    
-            let user = await User.findOne({ email });
+            let user = await User.findOne({ where: { email } });
+            if (user) return res.status(400).json({ msg: 'User already exists' });
 
-            if (user) {
-                return res.status(400).json({ msg: 'User already exists' });
-            }
-
-            const salt = await bcrypt.genSalt(10);
-            const hashedPassword = await bcrypt.hash(password, salt);
-
-            user = new User({
-                name,
-                email,
-                password: hashedPassword,
-                profile: profileImage
-            });
-
-            await user.save();
+            const hashedPassword = await bcrypt.hash(password, 10);
+            user = await User.create({ name, email, password: hashedPassword, profile: profileImage });
 
             const payload = { user: { id: user.id } };
             jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' }, (err, token) => {
                 if (err) throw err;
-                res.json({token : token });
+                res.json({ token });
             });
         } catch (err) {
             console.error(err.message);
@@ -95,27 +65,17 @@ router.post(
 
 // Login Route
 router.post('/login', async (req, res) => {
-   
+    const { email, password } = req.body;
     try {
-        const { email, password } = req.body;
-
-        let user = await User.findOne({ email });
-
-        if (!user) {
-            return res.status(400).json({ msg: 'Invalid credentials' });
-        }
-
-        const isMatch = await bcrypt.compare(password, user.password);
-
-        if (!isMatch) {
+        let user = await User.findOne({ where: { email } });
+        if (!user || !(await bcrypt.compare(password, user.password))) {
             return res.status(400).json({ msg: 'Invalid credentials' });
         }
 
         const payload = { user: { id: user.id } };
-
         jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' }, (err, token) => {
             if (err) throw err;
-            res.json({token: token });
+            res.json({ token });
         });
     } catch (err) {
         console.error(err.message);
@@ -125,21 +85,14 @@ router.post('/login', async (req, res) => {
 
 // Forgot Password Route
 router.post('/forgot-password', async (req, res) => {
-
+    const { email } = req.body;
     try {
-        const { email } = req.body;
-        let user = await User.findOne({ email });
-
-        if (!user) {
-            return res.status(400).json({ msg: 'User not found' });
-        }
+        let user = await User.findOne({ where: { email } });
+        if (!user) return res.status(400).json({ msg: 'User not found' });
 
         const resetToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '15m' });
-
         const resetUrl = `http://localhost:5000/api/users/reset-password/${resetToken}`;
-
         await sendMail(email, 'Password Reset', `Reset your password using this link: ${resetUrl}`);
-
         res.json({ msg: 'Password reset email sent' });
     } catch (err) {
         console.error(err.message);
@@ -149,22 +102,17 @@ router.post('/forgot-password', async (req, res) => {
 
 // Reset Password Route
 router.post('/reset-password/:token', async (req, res) => {
+    const { password } = req.body;
+    const { token } = req.params;
 
     try {
-        const { password } = req.body;
-        const { token } = req.params;
-    
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        let user = await User.findById(decoded.id);
+        let user = await User.findByPk(decoded.id);
+        if (!user) return res.status(400).json({ msg: 'User not found' });
 
-        if (!user) {
-            return res.status(400).json({ msg: 'User not found' });
-        }
-
-        const salt = await bcrypt.genSalt(10);
-        user.password = await bcrypt.hash(password, salt);
+        const hashedPassword = await bcrypt.hash(password, 10);
+        user.password = hashedPassword;
         await user.save();
-
         res.json({ msg: 'Password successfully updated' });
     } catch (err) {
         console.error(err.message);
@@ -172,33 +120,20 @@ router.post('/reset-password/:token', async (req, res) => {
     }
 });
 
-
 // Update Profile Route
 router.put('/update-profile', upload.single('profileImage'), async (req, res) => {
+    const { name, email } = req.body;
+    const profileImage = req.file ? `/uploads/${req.file.filename}` : '';
+
     try {
-        const { name, email } = req.body;
-        const profileImage = req.file ? `/uploads/${req.file.profile}` : '';
-    
-        let user = await User.findOne({ email });
+        let user = await User.findOne({ where: { email } });
+        if (!user) return res.status(400).json({ msg: 'User not found' });
 
-        if (!user) {
-            return res.status(400).json({ msg: 'User not found' });
-        }
+        user.name = name || user.name;
+        user.profile = profileImage || user.profile;
+        await user.save();
 
-        if (profileImage && user.profile) {
-            const oldImagePath = path.join(__dirname, '..', user.profile); 
-            if (fs.existsSync(oldImagePath)) {
-                fs.unlinkSync(oldImagePath);  
-            }
-        }
-
-        const updatedUser = await User.findOneAndUpdate(
-            { email }, 
-            { $set: { name, profile: profileImage } }, 
-            { new: true } 
-        );
-
-        res.json({ userDetails: updatedUser });  
+        res.json({ userDetails: user });
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Server error');
