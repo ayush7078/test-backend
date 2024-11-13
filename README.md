@@ -32,6 +32,7 @@ MYSQL_DATABASE=assignment
 JWT_SECRET=your_jwt_secret
 EMAIL_USER=your_email@example.com
 EMAIL_PASS=your_email_password
+MYSQL_PORT=3306
 
 4. Start the Server
 Start the server by running the following command:
