@@ -18,7 +18,11 @@ const User = sequelize.define('User', {
     profile: {
         type: DataTypes.STRING,
         defaultValue: ''
-    }
+    },
+   
+}, {
+    timestamps: true 
+
 });
 
 module.exports = User;

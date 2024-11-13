@@ -5,11 +5,19 @@ const nodemailer = require('nodemailer');
 const { check, validationResult } = require('express-validator');
 const multer = require('multer');
 const path = require('path');
-const User = require('../models/User');
 const dotenv = require('dotenv');
+const mysql = require('mysql2/promise');
 
 dotenv.config();
 const router = express.Router();
+
+// Database connection
+const db = mysql.createPool({
+    host: process.env.MYSQL_HOST,
+    user: process.env.MYSQL_USER,
+    password: process.env.MYSQL_PASSWORD,
+    database: process.env.MYSQL_DATABASE
+});
 
 // Multer configuration for image uploads
 const storage = multer.diskStorage({
@@ -45,13 +53,14 @@ router.post(
         const profileImage = req.file ? `/uploads/${req.file.filename}` : '';
 
         try {
-            let user = await User.findOne({ where: { email } });
-            if (user) return res.status(400).json({ msg: 'User already exists' });
+            const [existingUser] = await db.execute('SELECT * FROM users WHERE email = ?', [email]);
+            if (existingUser.length > 0) return res.status(400).json({ msg: 'User already exists' });
 
             const hashedPassword = await bcrypt.hash(password, 10);
-            user = await User.create({ name, email, password: hashedPassword, profile: profileImage });
+            await db.execute('INSERT INTO users (name, email, password, profile) VALUES (?, ?, ?, ?)', [name, email, hashedPassword, profileImage]);
 
-            const payload = { user: { id: user.id } };
+            const [newUser] = await db.execute('SELECT id FROM users WHERE email = ?', [email]);
+            const payload = { user: { id: newUser[0].id } };
             jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' }, (err, token) => {
                 if (err) throw err;
                 res.json({ token });
@@ -67,12 +76,12 @@ router.post(
 router.post('/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        let user = await User.findOne({ where: { email } });
-        if (!user || !(await bcrypt.compare(password, user.password))) {
+        const [user] = await db.execute('SELECT * FROM users WHERE email = ?', [email]);
+        if (user.length === 0 || !(await bcrypt.compare(password, user[0].password))) {
             return res.status(400).json({ msg: 'Invalid credentials' });
         }
 
-        const payload = { user: { id: user.id } };
+        const payload = { user: { id: user[0].id } };
         jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' }, (err, token) => {
             if (err) throw err;
             res.json({ token });
@@ -82,17 +91,21 @@ router.post('/login', async (req, res) => {
         res.status(500).send('Server error');
     }
 });
-
 // Forgot Password Route
 router.post('/forgot-password', async (req, res) => {
     try {
         const { email } = req.body;
-        let user = await User.findOne({ where: { email } });
-        if (!user) return res.status(400).json({ msg: 'User not found' });
+        console.log('Request body:', req.body);
+        const [rows] = await db.execute('SELECT * FROM users WHERE email = ?', [email]);
+        
+        if (rows.length === 0) return res.status(400).json({ msg: 'User not found' });
 
-        const resetToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '15m' });
+        const resetToken = jwt.sign({ id: rows[0].id }, process.env.JWT_SECRET, { expiresIn: '15m' });
         const resetUrl = `http://localhost:5000/api/users/reset-password/${resetToken}`;
+        
+        // Send reset email
         await sendMail(email, 'Password Reset', `Reset your password using this link: ${resetUrl}`);
+        
         res.json({ msg: 'Password reset email sent' });
     } catch (err) {
         console.error(err.message);
@@ -100,19 +113,17 @@ router.post('/forgot-password', async (req, res) => {
     }
 });
 
+
 // Reset Password Route
 router.post('/reset-password/:token', async (req, res) => {
-   
     try {
         const { password } = req.body;
-        const { token } = req.params;    
+        const { token } = req.params;
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        let user = await User.findByPk(decoded.id);
-        if (!user) return res.status(400).json({ msg: 'User not found' });
-
+        
         const hashedPassword = await bcrypt.hash(password, 10);
-        user.password = hashedPassword;
-        await user.save();
+        await db.execute('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, decoded.id]);
+        
         res.json({ msg: 'Password successfully updated' });
     } catch (err) {
         console.error(err.message);
@@ -126,14 +137,12 @@ router.put('/update-profile', upload.single('profileImage'), async (req, res) =>
     const profileImage = req.file ? `/uploads/${req.file.filename}` : '';
 
     try {
-        let user = await User.findOne({ where: { email } });
-        if (!user) return res.status(400).json({ msg: 'User not found' });
+        const [user] = await db.execute('SELECT * FROM users WHERE email = ?', [email]);
+        if (user.length === 0) return res.status(400).json({ msg: 'User not found' });
 
-        user.name = name || user.name;
-        user.profile = profileImage || user.profile;
-        await user.save();
+        await db.execute('UPDATE users SET name = ?, profile = ? WHERE email = ?', [name || user[0].name, profileImage || user[0].profile, email]);
 
-        res.json({ userDetails: user });
+        res.json({ userDetails: { name: name || user[0].name, email, profile: profileImage || user[0].profile } });
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Server error');
