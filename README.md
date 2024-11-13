@@ -75,7 +75,7 @@ Checks if a string is a palindrome.
 Fields: str
 Response: Returns true or false based on whether the string is a palindrome.
 
-7. POST /api/users/unique-count-duplicates
+7. POST /api/users/unique-Countduplicates
 Returns unique values in an array and the count of duplicate values.
 
 Fields: array

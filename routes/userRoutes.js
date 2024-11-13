@@ -65,8 +65,8 @@ router.post(
 
 // Login Route
 router.post('/login', async (req, res) => {
-    const { email, password } = req.body;
     try {
+        const { email, password } = req.body;
         let user = await User.findOne({ where: { email } });
         if (!user || !(await bcrypt.compare(password, user.password))) {
             return res.status(400).json({ msg: 'Invalid credentials' });
@@ -85,8 +85,8 @@ router.post('/login', async (req, res) => {
 
 // Forgot Password Route
 router.post('/forgot-password', async (req, res) => {
-    const { email } = req.body;
     try {
+        const { email } = req.body;
         let user = await User.findOne({ where: { email } });
         if (!user) return res.status(400).json({ msg: 'User not found' });
 
@@ -102,10 +102,10 @@ router.post('/forgot-password', async (req, res) => {
 
 // Reset Password Route
 router.post('/reset-password/:token', async (req, res) => {
-    const { password } = req.body;
-    const { token } = req.params;
-
+   
     try {
+        const { password } = req.body;
+        const { token } = req.params;    
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         let user = await User.findByPk(decoded.id);
         if (!user) return res.status(400).json({ msg: 'User not found' });
@@ -145,7 +145,6 @@ router.post('/palindrome', (req, res) => {
     const str = req.body.str;
     let j = str.length - 1;
     let isPalindrome = true;
-
 
     for (let i = 0; i < j / 2; i++) {
         let x = str[i];        
